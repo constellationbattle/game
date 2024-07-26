@@ -5,13 +5,10 @@ abi Game {
     fn mint_monster();
 
     #[storage(read)]
-    fn get_my_monster()->Option<Monster>;
+    fn get_my_info()->(Option<Monster>, Option<Fruit>, Option<Constellation>, Option<Accelerator>, Option<u64>);
 
     #[storage(read, write)]
     fn buy_fruit(_styles: u8, _amount: u16);
-
-    #[storage(read)]
-    fn get_my_fruit()->Option<Fruit>;
 
     #[storage(read, write)]
     fn feed_fruit(_styles: u8);
@@ -99,6 +96,7 @@ enum MarketError {
 
 enum TimeError {
     NotEnoughTime: (),
+    Expiry: (),
 }
 
 struct Monster {
@@ -146,8 +144,19 @@ struct Market{
     constella: u16,
 }
 
+configurable {
+    ADMIN: Identity = Identity::Address(Address::from(0xb9d62dec6e8b87e495772cd81862db31394bfc3b4d1cb6e04c530f21e3ac1f80)),
+    ONEDAY: u64 = 60*2*1,
+    TWODAYS: u64 = 60*2*2,
+    THREEDAYS: u64 = 60*2*3,
+    FIVEDAYS: u64 = 60*2*5,
+    ADDEIGHT: u64 = 10*8,
+    ADDSIXTEEN: u64 = 10*10,
+    ADDONEDAY: u64 = 60*2*1,
+}
+
 storage {
-    base_life: u64 = 3600*24*1,
+    // base_life: u64 = 3600*24*1,
     apple_price: u64 = 100000,
     banana_price: u64 = 200000,
     ananas_price: u64 = 300000,
@@ -155,6 +164,7 @@ storage {
     myfruit: StorageMap<Identity, Fruit> = StorageMap {},
     myconstellation: StorageMap<Identity, Constellation> = StorageMap {},
     myaccelerator: StorageMap<Identity, Accelerator> = StorageMap {},
+    mypoints: StorageMap<Identity, u64> = StorageMap {},
     markets: StorageMap<b256, Market> = StorageMap {},
 }
 
@@ -174,13 +184,20 @@ impl Game for Contract {
         // Omitting the processing algorithm for random numbers
 
         // Store monster
-        let monster = Monster{gene: _geni.unwrap(), starttime: timestamp(), genetime:timestamp(), cardtime: timestamp(), turntabletime: timestamp(), expiry: timestamp()+ 3600*24*_expiry, bonus: _bonus};
+        let monster = Monster{gene: _geni.unwrap(), starttime: timestamp(), genetime:timestamp(), cardtime: timestamp(), turntabletime: timestamp(), expiry: timestamp()+ 3600*1*_expiry, bonus: _bonus};
         storage.mymonster.insert(identity, monster);
     }
 
     #[storage(read)]
-    fn get_my_monster()->Option<Monster>{
-        storage.mymonster.get(msg_sender().unwrap()).try_read()
+    fn get_my_info()->(Option<Monster>, Option<Fruit>, Option<Constellation>, Option<Accelerator>, Option<u64>) {
+        let identity = msg_sender().unwrap();
+        (storage.mymonster.get(identity).try_read(), 
+         storage.myfruit.get(identity).try_read(), 
+         storage.myconstellation.get(identity).try_read(), 
+         storage.myaccelerator.get(identity).try_read(),
+         storage.mypoints.get(identity).try_read(),
+        )
+
     }
 
     #[storage(read, write)]
@@ -200,6 +217,8 @@ impl Game for Contract {
             }else{
                 _fruit.ananas = _fruit.ananas + _amount;
             }
+            //update
+            storage.myfruit.insert(identity, _fruit);
 
         }else{
             
@@ -216,22 +235,20 @@ impl Game for Contract {
         }
     }
 
-    #[storage(read)]
-    fn get_my_fruit()->Option<Fruit>{
-        storage.myfruit.get(msg_sender().unwrap()).try_read()
-    }
-
     #[storage(read, write)]
     fn feed_fruit(_styles: u8){
         let identity = msg_sender().unwrap();
         let fruit = storage.myfruit.get(identity).try_read();
         let monster = storage.mymonster.get(identity).try_read();
-        //check if expiry todo
         require(fruit.is_some(),
             FruitError::NotAvailable,
         );
         require(monster.is_some(),
             MonsterError::NotAvailable,
+        );
+        //check if expiry
+        require(monster.unwrap().expiry > timestamp(),
+            TimeError::Expiry,
         );
         let mut _fruit = fruit.unwrap();
         let mut _monster = monster.unwrap();
@@ -241,22 +258,25 @@ impl Game for Contract {
                 AmountError::NeedAboveZero,
             );
             _fruit.apple = _fruit.apple - 1;
-            _monster.expiry = timestamp() + 3600*24*2;
+            _monster.expiry = timestamp() + TWODAYS;
         }else if _styles == 2{
             require(
                 _fruit.banana > 0,
                 AmountError::NeedAboveZero,
             );
             _fruit.banana = _fruit.banana - 1;
-            _monster.expiry = timestamp() + 3600*24*3;
+            _monster.expiry = timestamp() + THREEDAYS;
         }else{
             require(
                 _fruit.ananas > 0,
                 AmountError::NeedAboveZero,
             );
             _fruit.ananas = _fruit.ananas - 1;
-            _monster.expiry = timestamp() + 3600*24*5;
+            _monster.expiry = timestamp() + FIVEDAYS;
         }
+        //update
+        storage.myfruit.insert(identity, _fruit);
+        storage.mymonster.insert(identity, _monster);
 
     }
 
@@ -281,22 +301,25 @@ impl Game for Contract {
                 AmountError::NeedAboveZero,
             );
             _accelerator.eight_add = _accelerator.eight_add - 1;
-            _monster.cardtime = _monster.cardtime + 3600*8;
+            _monster.cardtime = _monster.cardtime - ADDEIGHT;
         }else if _styles == 2 {
             require(
                 _accelerator.sixteen_add > 0,
                 AmountError::NeedAboveZero,
             );
             _accelerator.sixteen_add = _accelerator.sixteen_add - 1;
-            _monster.cardtime = _monster.cardtime + 3600*16;
+            _monster.cardtime = _monster.cardtime - ADDSIXTEEN;
         }else {
             require(
                 _accelerator.twentyfour_add > 0,
                 AmountError::NeedAboveZero,
             );
             _accelerator.twentyfour_add = _accelerator.twentyfour_add - 1;
-            _monster.cardtime = _monster.cardtime + 3600*24;
+            _monster.cardtime = _monster.cardtime - ADDONEDAY;
         }
+        //update
+        storage.myaccelerator.insert(identity, _accelerator);
+        storage.mymonster.insert(identity, _monster);
 
     }
 
@@ -309,10 +332,9 @@ impl Game for Contract {
             MonsterError::NotAvailable,
         );
         require(
-            timestamp() > monster.unwrap().cardtime + 3600*24*1,
+            timestamp() > monster.unwrap().cardtime + ONEDAY,
             TimeError::NotEnoughTime,
         );
-
         // Omitting the processing algorithm for random numbers
         let random = 3;
         // Omitting the processing algorithm for random numbers
@@ -345,6 +367,8 @@ impl Game for Contract {
             }else {
                 _constellation.pisces = _constellation.pisces + 1;
             }
+            //update
+            storage.myconstellation.insert(identity, _constellation);
 
         }else{
             if random == 1 {
@@ -387,6 +411,8 @@ impl Game for Contract {
         }
         let mut _monster = monster.unwrap();
         _monster.cardtime = timestamp();
+        //update
+        storage.mymonster.insert(identity, _monster);
 
     }
 
@@ -394,6 +420,7 @@ impl Game for Contract {
     fn combine_constellation(){
         let identity = msg_sender().unwrap();
         let constellation = storage.myconstellation.get(identity).try_read();
+        let point = storage.mypoints.get(identity).try_read();
         require(
             constellation.is_some(),
             ConstellationError::NotAvailable,
@@ -416,6 +443,16 @@ impl Game for Contract {
         _constellation.aquarius = _constellation.aquarius - 1;
         _constellation.pisces = _constellation.pisces - 1;
         _constellation.angel = _constellation.angel + 1;
+        //update
+        storage.myconstellation.insert(identity, _constellation);
+        if(point.is_some()){
+            let mut _point = point.unwrap();
+            _point = _point + 10;
+            //update
+            storage.mypoints.insert(identity, _point);
+        }else{
+            storage.mypoints.insert(identity, 10);
+        }
     }
 
     #[storage(read, write)]
@@ -427,7 +464,7 @@ impl Game for Contract {
             MonsterError::NotAvailable,
         );
         require(
-            timestamp() > monster.unwrap().genetime + 3600*24*1,
+            timestamp() > monster.unwrap().genetime + ONEDAY,
             TimeError::NotEnoughTime,
         );
 
@@ -437,11 +474,12 @@ impl Game for Contract {
         // Omitting the processing algorithm for random numbers
 
         let mut _monster = monster.unwrap();
-        _monster.gene = _geni;
+        _monster.gene = _geni.unwrap();
         _monster.bonus = _bonus;
         _monster.genetime = timestamp();
 
-       //update todo
+        //update
+        storage.mymonster.insert(identity, _monster);
 
     }
 
@@ -536,6 +574,9 @@ impl Game for Contract {
             _constellation.pisces = _constellation.pisces - 1;
         }
 
+        //update
+        storage.myconstellation.insert(identity, _constellation);
+
         //generate gene 
         let random = 10;
         let listid: b256 = sha256((timestamp(), msg_sender().unwrap(), random, _styles));
@@ -564,7 +605,7 @@ impl Game for Contract {
             ConstellationError::NotAvailable,
         );
         let mut _my_constellation = my_constellation.unwrap();
-        let mut _market = market.unwrap();
+        let _market = market.unwrap();
 
         if _market.constella == 1 {
             _my_constellation.aries = _my_constellation.aries + 1;
@@ -591,6 +632,9 @@ impl Game for Contract {
         }else {
             _my_constellation.pisces = _my_constellation.pisces + 1;
         }
+
+        //update
+        storage.myconstellation.insert(identity, _my_constellation);
 
         let newmarket = Market{owner: Identity::Address(Address::zero()), ownergene: 0, constella: 0};
         storage.markets.insert(_listid, newmarket);
@@ -692,7 +736,7 @@ impl Game for Contract {
             MarketError::NotAvailable,
         );
 
-        // Omitting the processing algorithm for random numbers
+         // Omitting the processing algorithm for random numbers
         let _random = 1;
         // Omitting the processing algorithm for random numbers
 
@@ -744,13 +788,14 @@ impl Game for Contract {
                 _my_constellation.pisces = _my_constellation.pisces - 1;
                 _owner_constellation.pisces = _owner_constellation.pisces + 1;
             }
-
-            return false;
+            //update
+            storage.myconstellation.insert(identity, _my_constellation);
+            storage.myconstellation.insert(identity, _owner_constellation);
 
         }else {
             //you win
             // add card to you, init card from market
-            let mut _market = market.unwrap();
+            let _market = market.unwrap();
 
             if _market.constella == 1 {
                 _my_constellation.aries = _my_constellation.aries + 1;
@@ -781,8 +826,34 @@ impl Game for Contract {
             let newmarket = Market{owner: Identity::Address(Address::zero()), ownergene: 0, constella: 0};
             storage.markets.insert(_listid, newmarket);
 
-            return true;
+            //update
+            storage.myconstellation.insert(identity, _my_constellation);
+
+            // return true;
         }
+        
+
+        let owner_point = storage.mypoints.get(market.unwrap().owner).try_read();
+        let use_point = storage.mypoints.get(identity).try_read();
+        if(owner_point.is_some()){
+            let mut _point = owner_point.unwrap();
+            _point = _point + 1;
+            //update
+            storage.mypoints.insert(market.unwrap().owner, _point);
+        }else{
+            storage.mypoints.insert(market.unwrap().owner, 1);
+        }
+
+        if(use_point.is_some()){
+            let mut _point = use_point.unwrap();
+            _point = _point + 1;
+            //update
+            storage.mypoints.insert(identity, _point);
+        }else{
+            storage.mypoints.insert(identity, 1);
+        }
+
+        return _random != 1;
 
 
     }
@@ -797,70 +868,94 @@ impl Game for Contract {
         );
 
         require(
-            timestamp() > monster.unwrap().turntabletime + 3600*24*1,
+            timestamp() > monster.unwrap().turntabletime + ONEDAY,
             TimeError::NotEnoughTime,
         );
 
-        // Omitting the processing algorithm for random numbers
+         // Omitting the processing algorithm for random numbers
         let _random = 3;
         // Omitting the processing algorithm for random numbers
-
+        
         let mut _monster = monster.unwrap();
         _monster.turntabletime = timestamp();
         if _random == 1 {
             //add apple
             let fruit = storage.myfruit.get(identity).try_read();
-            require(
-                fruit.is_some(),
-                FruitError::NotAvailable,
-            );
-            let mut _fruit = fruit.unwrap();
-            _fruit.apple = _fruit.apple + 1;
+            if fruit.is_some() {
+                let mut _fruit = fruit.unwrap();
+                _fruit.apple = _fruit.apple + 1;
+                //update
+                storage.myfruit.insert(identity, _fruit);
+            }else {
+                let _fruit = Fruit{apple: 1, banana: 0, ananas: 0};
+                storage.myfruit.insert(identity, _fruit);
+            }
+            
         }else if _random == 2 {
             //add banana
             let fruit = storage.myfruit.get(identity).try_read();
-            require(
-                fruit.is_some(),
-                FruitError::NotAvailable,
-            );
-            let mut _fruit = fruit.unwrap();
-            _fruit.banana = _fruit.banana + 1;
+            
+            if fruit.is_some() {
+                let mut _fruit = fruit.unwrap();
+                _fruit.banana = _fruit.banana + 1;
+                //update
+                storage.myfruit.insert(identity, _fruit);
+            }else {
+                let _fruit = Fruit{apple: 0, banana: 1, ananas: 0};
+                storage.myfruit.insert(identity, _fruit);
+            }
         }else if _random == 3 {
             //add accelerator_card 8
             let accelerator = storage.myaccelerator.get(identity).try_read();
-            require(
-                accelerator.is_some(),
-                AcceleratorError::NotAvailable,
-            );
-            let mut _accelerator = accelerator.unwrap();
-            _accelerator.eight_add = _accelerator.eight_add + 1;
+            if accelerator.is_some() {
+                let mut _accelerator = accelerator.unwrap();
+                _accelerator.eight_add = _accelerator.eight_add + 1;
+                //update
+                storage.myaccelerator.insert(identity, _accelerator);
+            }else {
+                let _accelerator = Accelerator{eight_add: 1, sixteen_add: 0, twentyfour_add: 0};
+                storage.myaccelerator.insert(identity, _accelerator);
+            }
+            
         }else if _random == 4 {
             //add accelerator_card 16
             let accelerator = storage.myaccelerator.get(identity).try_read();
-            require(
-                accelerator.is_some(),
-                AcceleratorError::NotAvailable,
-            );
-            let mut _accelerator = accelerator.unwrap();
-            _accelerator.sixteen_add = _accelerator.sixteen_add + 1;
+            if accelerator.is_some() {
+                let mut _accelerator = accelerator.unwrap();
+                _accelerator.sixteen_add = _accelerator.sixteen_add + 1;
+                //update
+                storage.myaccelerator.insert(identity, _accelerator);
+            }else {
+                let _accelerator = Accelerator{eight_add: 0, sixteen_add: 1, twentyfour_add: 0};
+                storage.myaccelerator.insert(identity, _accelerator);
+            }
+            
         }else if _random == 5 {
             //add accelerator_card 24
             let accelerator = storage.myaccelerator.get(identity).try_read();
-            require(
-                accelerator.is_some(),
-                AcceleratorError::NotAvailable,
-            );
-            let mut _accelerator = accelerator.unwrap();
-            _accelerator.twentyfour_add = _accelerator.twentyfour_add + 1;
+            if accelerator.is_some() {
+                let mut _accelerator = accelerator.unwrap();
+                _accelerator.twentyfour_add = _accelerator.twentyfour_add + 1;
+                //update
+                storage.myaccelerator.insert(identity, _accelerator);
+            }else{
+                let _accelerator = Accelerator{eight_add: 0, sixteen_add: 0, twentyfour_add: 1};
+                storage.myaccelerator.insert(identity, _accelerator);
+            }
+            
         }else{
             //add universal card
             let constellation = storage.myconstellation.get(identity).try_read();
-            require(
-                constellation.is_some(),
-                ConstellationError::NotAvailable,
-            );
-            let mut _constellation = constellation.unwrap();
-            _constellation.universal = _constellation.universal + 1;
+            if constellation.is_some() {
+                let mut _constellation = constellation.unwrap();
+                _constellation.universal = _constellation.universal + 1;
+                //update
+                storage.myconstellation.insert(identity, _constellation);
+            }else{
+                let _constellation = Constellation{aries: 0, taurus: 0, gemini: 0, cancer: 0, leo: 0, virgo: 0, libra: 0, scorpio: 0, sagittarius: 0, capricornus: 0, aquarius: 0, pisces: 0, angel: 0, universal: 1};
+                storage.myconstellation.insert(identity, _constellation);
+            }
+            
         }
 
     }
@@ -904,6 +999,8 @@ impl Game for Contract {
         }else {
             _constellation.pisces = _constellation.pisces + 1;
         }
+        //update
+        storage.myconstellation.insert(identity, _constellation);
 
     }
 
