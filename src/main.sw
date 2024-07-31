@@ -157,6 +157,8 @@ configurable {
 
 storage {
     // base_life: u64 = 3600*24*1,
+    epoch: u64 = 0,
+    epoch_time: u64 = 0,
     apple_price: u64 = 100000,
     banana_price: u64 = 200000,
     ananas_price: u64 = 300000,
@@ -186,6 +188,11 @@ impl Game for Contract {
         // Store monster
         let monster = Monster{gene: _geni.unwrap(), starttime: timestamp(), genetime:timestamp(), cardtime: timestamp(), turntabletime: timestamp(), expiry: timestamp()+ 3600*1*_expiry, bonus: _bonus};
         storage.mymonster.insert(identity, monster);
+
+        if storage.epoch.read() == 0 {
+            storage.epoch.write(1);
+            storage.epoch_time.write(timestamp());
+        }
     }
 
     #[storage(read)]
@@ -468,11 +475,12 @@ impl Game for Contract {
             TimeError::NotEnoughTime,
         );
 
-        // Omitting the processing algorithm for random numbers
+         // Omitting the processing algorithm for random numbers
         let _geni = 12020329928232323;
         let _bonus = 5;
         // Omitting the processing algorithm for random numbers
 
+        //generate bonus
         let mut _monster = monster.unwrap();
         _monster.gene = _geni.unwrap();
         _monster.bonus = _bonus;
@@ -577,7 +585,7 @@ impl Game for Contract {
         //update
         storage.myconstellation.insert(identity, _constellation);
 
-        //generate gene 
+        //generate hash 
         let random = 10;
         let listid: b256 = sha256((timestamp(), msg_sender().unwrap(), random, _styles));
         
@@ -636,8 +644,10 @@ impl Game for Contract {
         //update
         storage.myconstellation.insert(identity, _my_constellation);
 
-        let newmarket = Market{owner: Identity::Address(Address::zero()), ownergene: 0, constella: 0};
-        storage.markets.insert(_listid, newmarket);
+        // let newmarket = Market{owner: Identity::Address(Address::zero()), ownergene: 0, constella: 0};
+        // storage.markets.insert(_listid, newmarket);
+        storage.markets.remove(_listid);
+
 
 
     }
@@ -875,7 +885,7 @@ impl Game for Contract {
          // Omitting the processing algorithm for random numbers
         let _random = 3;
         // Omitting the processing algorithm for random numbers
-        
+
         let mut _monster = monster.unwrap();
         _monster.turntabletime = timestamp();
         if _random == 1 {
