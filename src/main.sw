@@ -2,12 +2,42 @@ contract;
 
 abi Game {
     #[storage(read, write)]
+    fn set_random_contract(_contract_id: b256);
+
+    #[storage(read, write)]
+    fn set_token_contract(_contract_id: b256);
+
+    #[storage(read, write)]
+    fn set_asset_id(_asset_id: b256);
+
+    #[storage(read, write)]
+    fn set_fruit_price(_apple_price: u64, _banana_price: u64, _ananas_price: u64);
+
+    #[storage(read, write)]
+    fn set_lucky_price(_lucky_price: u64);
+
+    #[storage(read, write)]
+    fn set_combine_price(_combine_price: u64);
+
+    #[storage(read, write)]
+    fn set_battle_price(_battle_price: u64);
+
+    #[storage(read, write)]
+    fn set_monster_price(_monster_price: u64);
+
+    #[storage(read, write)]
+    fn set_gene_price(_gene_price: u64);
+
+    #[storage(read, write)]
+    fn set_token_price(_token_price: u64);
+
+    #[payable, storage(read, write)]
     fn mint_monster();
 
     #[storage(read)]
-    fn get_my_info()->(Option<Monster>, Option<Fruit>, Option<Constellation>, Option<Accelerator>, Option<u64>);
+    fn get_my_info()->(Option<Monster>, Option<Fruit>, Option<Constellation>, Option<Accelerator>, Option<u64>, u64, u64);
 
-    #[storage(read, write)]
+    #[payable, storage(read, write)]
     fn buy_fruit(_styles: u8, _amount: u16);
 
     #[storage(read, write)]
@@ -19,32 +49,50 @@ abi Game {
     #[storage(read, write)]
     fn claim_constellation();
 
-     #[storage(read, write)]
+    #[payable, storage(read, write)]
     fn combine_constellation();
 
-    #[storage(read, write)]
+    #[payable, storage(read, write)]
     fn regenerate_gene();
 
-    #[storage(read, write)]
+    #[payable, storage(read, write)]
+    fn rebirth();
+
+    #[payable, storage(read, write)]
     fn list_constellation(_styles: u8) -> b256;
 
+    #[payable, storage(read, write)]
     #[storage(read, write)]
     fn delist_constellation(_listid: b256);
 
      #[storage(read)]
     fn get_market(_listid: b256) -> Option<Market>;
 
-    #[storage(read, write)]
+    #[payable, storage(read, write)]
     fn battle(_use_styles: u8, _listid: b256) -> bool;
 
-    #[storage(read, write)]
+    #[payable, storage(read, write)]
     fn lucky_turntable();
 
     #[storage(read, write)]
     fn use_universal_card(_styles: u8);
 
+    #[payable, storage(read, write)]
+    fn buy_coin(amount: u64);
+
+}
+
+abi Random {
     #[storage(read, write)]
-    fn buy_coin();
+    fn getRandom() -> u64;
+}
+
+abi Token {
+    #[storage(read, write)]
+    fn mint(recipient: Identity, sub_id: SubId, amount: u64);
+
+    // #[storage(read)]
+    // fn getAssetId() -> AssetId;
 }
 
 use std::{
@@ -52,6 +100,7 @@ use std::{
     block::timestamp,
     call_frames::msg_asset_id,
     constants::ZERO_B256,
+    constants::DEFAULT_SUB_ID,
     context::msg_amount,
     hash::*,
     storage::{
@@ -74,29 +123,22 @@ enum AmountError {
     NeedAboveZero: (),
 }
 
-enum FruitError {
-    NotAvailable: (),
-}
-
-enum MonsterError {
-    NotAvailable: (),
-}
-
-enum ConstellationError {
-    NotAvailable: (),
-}
-
-enum AcceleratorError {
-    NotAvailable: (),
-}
-
-enum MarketError {
+enum AvailableError {
     NotAvailable: (),
 }
 
 enum TimeError {
     NotEnoughTime: (),
     Expiry: (),
+}
+
+enum AuthorizationError {
+    SenderNotOwner: (),
+}
+
+enum AssetError {
+    InsufficientPayment: (),
+    IncorrectAssetSent: (),
 }
 
 struct Monster {
@@ -142,41 +184,156 @@ struct Market{
     owner: Identity,
     ownergene: u64,
     constella: u16,
+    epoch: u64,
 }
+
 
 configurable {
     ADMIN: Identity = Identity::Address(Address::from(0xb9d62dec6e8b87e495772cd81862db31394bfc3b4d1cb6e04c530f21e3ac1f80)),
-    ONEDAY: u64 = 60*2*1,
-    TWODAYS: u64 = 60*2*2,
-    THREEDAYS: u64 = 60*2*3,
-    FIVEDAYS: u64 = 60*2*5,
-    ADDEIGHT: u64 = 10*8,
-    ADDSIXTEEN: u64 = 10*10,
-    ADDONEDAY: u64 = 60*2*1,
+    ONEDAY: u64 = 60*5*1,
+    TWODAYS: u64 = 60*5*2,
+    THREEDAYS: u64 = 60*5*3,
+    FIVEDAYS: u64 = 60*5*5,
+    ADDEIGHT: u64 = 60*2,
+    ADDSIXTEEN: u64 = 60*3,
+    ADDONEDAY: u64 = 60*5,
+    EPOCHDIFF: u64 = 60*75,
 }
 
 storage {
-    // base_life: u64 = 3600*24*1,
     epoch: u64 = 0,
     epoch_time: u64 = 0,
+    monster_price: u64 = 100000,
+    gene_price: u64 = 100000,
     apple_price: u64 = 100000,
     banana_price: u64 = 200000,
-    ananas_price: u64 = 300000,
+    ananas_price: u64 = 400000,
+    lucky_price: u64 = 100*1000000000,
+    combine_price: u64 = 500*1000000000,
+    battle_price: u64 = 10*1000000000,
+    token_price: u64 = 1000000, //1000000 token/eth
     mymonster: StorageMap<Identity, Monster> = StorageMap {},
     myfruit: StorageMap<Identity, Fruit> = StorageMap {},
-    myconstellation: StorageMap<Identity, Constellation> = StorageMap {},
+    myconstellation: StorageMap<(Identity, u64), Constellation> = StorageMap {},
     myaccelerator: StorageMap<Identity, Accelerator> = StorageMap {},
     mypoints: StorageMap<Identity, u64> = StorageMap {},
     markets: StorageMap<b256, Market> = StorageMap {},
+    random_contract_id: b256 = 0xb9d62dec6e8b87e495772cd81862db31394bfc3b4d1cb6e04c530f21e3ac1f80,
+    token_contract_id: b256 = 0xb9d62dec6e8b87e495772cd81862db31394bfc3b4d1cb6e04c530f21e3ac1f80,
+    asset_id: b256 = 0xb9d62dec6e8b87e495772cd81862db31394bfc3b4d1cb6e04c530f21e3ac1f80,
 }
 
 impl Game for Contract {
+    #[storage(read, write)]
+    fn set_random_contract(_contract_id: b256){
+        require(
+            msg_sender().unwrap() == ADMIN, 
+            AuthorizationError::SenderNotOwner,
+        );
+        storage.random_contract_id.write(_contract_id);
+    }
+
+    #[storage(read, write)]
+    fn set_token_contract(_contract_id: b256){
+        require(
+            msg_sender().unwrap() == ADMIN, 
+            AuthorizationError::SenderNotOwner,
+        );
+        storage.token_contract_id.write(_contract_id);
+    }
+
+    #[storage(read, write)]
+    fn set_asset_id(_asset_id: b256){
+        require(
+            msg_sender().unwrap() == ADMIN, 
+            AuthorizationError::SenderNotOwner,
+        );
+        storage.asset_id.write(_asset_id);
+    }
+
+    #[storage(read, write)]
+    fn set_fruit_price(_apple_price: u64, _banana_price: u64, _ananas_price: u64){
+        require(
+            msg_sender().unwrap() == ADMIN, 
+            AuthorizationError::SenderNotOwner,
+        );
+        require(
+            _apple_price > 0 && _banana_price > 0 && _ananas_price > 0, 
+            AmountError::NeedAboveZero,
+        );
+        storage.apple_price.write(_apple_price);
+        storage.banana_price.write(_banana_price);
+        storage.ananas_price.write(_ananas_price);
+    }
+
+    #[storage(read, write)]
+    fn set_lucky_price(_lucky_price: u64){
+        require(
+            msg_sender().unwrap() == ADMIN, 
+            AuthorizationError::SenderNotOwner,
+        );
+        storage.lucky_price.write(_lucky_price);
+    }
+
+    #[storage(read, write)]
+    fn set_combine_price(_combine_price: u64){
+        require(
+            msg_sender().unwrap() == ADMIN, 
+            AuthorizationError::SenderNotOwner,
+        );
+        storage.combine_price.write(_combine_price);
+    }
+
+    #[storage(read, write)]
+    fn set_battle_price(_battle_price: u64){
+        require(
+            msg_sender().unwrap() == ADMIN, 
+            AuthorizationError::SenderNotOwner,
+        );
+        storage.battle_price.write(_battle_price);
+    }
+
+    #[storage(read, write)]
+    fn set_monster_price(_monster_price: u64){
+        require(
+            msg_sender().unwrap() == ADMIN, 
+            AuthorizationError::SenderNotOwner,
+        );
+        storage.monster_price.write(_monster_price);
+    }
+
+    #[storage(read, write)]
+    fn set_gene_price(_gene_price: u64){
+        require(
+            msg_sender().unwrap() == ADMIN, 
+            AuthorizationError::SenderNotOwner,
+        );
+        storage.gene_price.write(_gene_price);
+    }
+
+    #[storage(read, write)]
+    fn set_token_price(_token_price: u64){
+        require(
+            msg_sender().unwrap() == ADMIN, 
+            AuthorizationError::SenderNotOwner,
+        );
+        storage.token_price.write(_token_price);
+    }
+
+    #[payable]
     #[storage(read, write)]
     fn mint_monster(){
         let identity = msg_sender().unwrap();
         let record = storage.mymonster.get(identity).try_read();
         require(record.is_none(),
             MintError::AlreadyMinted,
+        );
+
+        // Verify payment
+        require(AssetId::base() == msg_asset_id(), AssetError::IncorrectAssetSent);
+        require(
+            storage.monster_price.read() <= msg_amount(),
+            AssetError::InsufficientPayment,
         );
 
         // Omitting the processing algorithm for random numbers
@@ -186,27 +343,40 @@ impl Game for Contract {
         // Omitting the processing algorithm for random numbers
 
         // Store monster
-        let monster = Monster{gene: _geni.unwrap(), starttime: timestamp(), genetime:timestamp(), cardtime: timestamp(), turntabletime: timestamp(), expiry: timestamp()+ 3600*1*_expiry, bonus: _bonus};
+        let monster = Monster{gene: _geni.unwrap(), starttime: timestamp(), genetime:timestamp(), cardtime: timestamp(), turntabletime: timestamp(), expiry: timestamp()+ ONEDAY*_expiry, bonus: _bonus};
         storage.mymonster.insert(identity, monster);
 
-        if storage.epoch.read() == 0 {
+        let _epoch = storage.epoch.read();
+
+        if _epoch == 0 {
             storage.epoch.write(1);
             storage.epoch_time.write(timestamp());
+        }
+
+        //check epoch time and update
+        let _epoch_time = storage.epoch_time.read();
+        if (timestamp() > _epoch_time + EPOCHDIFF) && (_epoch > 0) {
+            storage.epoch_time.write(timestamp());
+            storage.epoch.write(_epoch + 1);
         }
     }
 
     #[storage(read)]
-    fn get_my_info()->(Option<Monster>, Option<Fruit>, Option<Constellation>, Option<Accelerator>, Option<u64>) {
+    fn get_my_info()->(Option<Monster>, Option<Fruit>, Option<Constellation>, Option<Accelerator>, Option<u64>, u64, u64) {
         let identity = msg_sender().unwrap();
+        let _epoch = storage.epoch.read();
         (storage.mymonster.get(identity).try_read(), 
          storage.myfruit.get(identity).try_read(), 
-         storage.myconstellation.get(identity).try_read(), 
+         storage.myconstellation.get((identity, _epoch)).try_read(), 
          storage.myaccelerator.get(identity).try_read(),
          storage.mypoints.get(identity).try_read(),
+         storage.epoch.read(),
+         storage.epoch_time.read(),
         )
 
     }
 
+    #[payable]
     #[storage(read, write)]
     fn buy_fruit(_styles: u8, _amount: u16){
         let identity = msg_sender().unwrap();
@@ -215,6 +385,26 @@ impl Game for Contract {
             _amount > 0,
             AmountError::NeedAboveZero,
         );
+        // Verify payment
+        require(AssetId::base() == msg_asset_id(), AssetError::IncorrectAssetSent);
+        if _styles == 1 {
+            require(
+                storage.apple_price.read() <= msg_amount(),
+                AssetError::InsufficientPayment,
+            );
+        }else if _styles == 2{
+            require(
+                storage.banana_price.read() <= msg_amount(),
+                AssetError::InsufficientPayment,
+            );
+        }else{
+            require(
+                storage.ananas_price.read() <= msg_amount(),
+                AssetError::InsufficientPayment,
+            );
+        }
+        
+
         if fruit.is_some() {
             let mut _fruit = fruit.unwrap();
             if _styles == 1 {
@@ -248,10 +438,10 @@ impl Game for Contract {
         let fruit = storage.myfruit.get(identity).try_read();
         let monster = storage.mymonster.get(identity).try_read();
         require(fruit.is_some(),
-            FruitError::NotAvailable,
+            AvailableError::NotAvailable,
         );
         require(monster.is_some(),
-            MonsterError::NotAvailable,
+            AvailableError::NotAvailable,
         );
         //check if expiry
         require(monster.unwrap().expiry > timestamp(),
@@ -294,11 +484,11 @@ impl Game for Contract {
         let monster = storage.mymonster.get(identity).try_read();
         require(
             monster.is_some(),
-            MonsterError::NotAvailable,
+            AvailableError::NotAvailable,
         );
         require(
             accelerator.is_some(),
-            AcceleratorError::NotAvailable,
+            AvailableError::NotAvailable,
         );
         let mut _accelerator = accelerator.unwrap();
         let mut _monster = monster.unwrap();
@@ -334,19 +524,21 @@ impl Game for Contract {
     fn claim_constellation(){
         let identity = msg_sender().unwrap();
         let monster = storage.mymonster.get(identity).try_read();
+        let _epoch = storage.epoch.read();
         require(
             monster.is_some(),
-            MonsterError::NotAvailable,
+            AvailableError::NotAvailable,
         );
         require(
             timestamp() > monster.unwrap().cardtime + ONEDAY,
             TimeError::NotEnoughTime,
         );
-        // Omitting the processing algorithm for random numbers
+        //check expiry todo
+       // Omitting the processing algorithm for random numbers
         let random = 3;
         // Omitting the processing algorithm for random numbers
 
-        let constellation = storage.myconstellation.get(identity).try_read();
+        let constellation = storage.myconstellation.get((identity, _epoch)).try_read();
         if constellation.is_some() {
             let mut _constellation = constellation.unwrap();
             if random == 1 {
@@ -375,45 +567,45 @@ impl Game for Contract {
                 _constellation.pisces = _constellation.pisces + 1;
             }
             //update
-            storage.myconstellation.insert(identity, _constellation);
+            storage.myconstellation.insert((identity, _epoch), _constellation);
 
         }else{
             if random == 1 {
                 let _constellation = Constellation{aries: 1, taurus: 0, gemini: 0, cancer: 0, leo: 0, virgo: 0, libra: 0, scorpio: 0, sagittarius: 0, capricornus: 0, aquarius: 0, pisces: 0, angel: 0, universal: 0};
-                storage.myconstellation.insert(identity, _constellation);
+                storage.myconstellation.insert((identity, _epoch), _constellation);
             }else if random == 2 {
                 let _constellation = Constellation{aries: 0, taurus: 1, gemini: 0, cancer: 0, leo: 0, virgo: 0, libra: 0, scorpio: 0, sagittarius: 0, capricornus: 0, aquarius: 0, pisces: 0, angel: 0, universal: 0};
-                storage.myconstellation.insert(identity, _constellation);
+                storage.myconstellation.insert((identity, _epoch), _constellation);
             }else if random == 3 {
                 let _constellation = Constellation{aries: 0, taurus: 0, gemini: 1, cancer: 0, leo: 0, virgo: 0, libra: 0, scorpio: 0, sagittarius: 0, capricornus: 0, aquarius: 0, pisces: 0, angel: 0, universal: 0};
-                storage.myconstellation.insert(identity, _constellation);
+                storage.myconstellation.insert((identity, _epoch), _constellation);
             }else if random == 4 {
                 let _constellation = Constellation{aries: 0, taurus: 0, gemini: 0, cancer: 1, leo: 0, virgo: 0, libra: 0, scorpio: 0, sagittarius: 0, capricornus: 0, aquarius: 0, pisces: 0, angel: 0, universal: 0};
-                storage.myconstellation.insert(identity, _constellation);
+                storage.myconstellation.insert((identity, _epoch), _constellation);
             }else if random == 5 {
                 let _constellation = Constellation{aries: 0, taurus: 0, gemini: 0, cancer: 0, leo: 1, virgo: 0, libra: 0, scorpio: 0, sagittarius: 0, capricornus: 0, aquarius: 0, pisces: 0, angel: 0, universal: 0};
-                storage.myconstellation.insert(identity, _constellation);
+                storage.myconstellation.insert((identity, _epoch), _constellation);
             }else if random == 6 {
                 let _constellation = Constellation{aries: 0, taurus: 0, gemini: 0, cancer: 0, leo: 0, virgo: 1, libra: 0, scorpio: 0, sagittarius: 0, capricornus: 0, aquarius: 0, pisces: 0, angel: 0, universal: 0};
-                storage.myconstellation.insert(identity, _constellation);
+                storage.myconstellation.insert((identity, _epoch), _constellation);
             }else if random == 7 {
                 let _constellation = Constellation{aries: 0, taurus: 0, gemini: 0, cancer: 0, leo: 0, virgo: 0, libra: 1, scorpio: 0, sagittarius: 0, capricornus: 0, aquarius: 0, pisces: 0, angel: 0, universal: 0};
-                storage.myconstellation.insert(identity, _constellation);
+                storage.myconstellation.insert((identity, _epoch), _constellation);
             }else if random == 8 {
                 let _constellation = Constellation{aries: 0, taurus: 0, gemini: 0, cancer: 0, leo: 0, virgo: 0, libra: 0, scorpio: 1, sagittarius: 0, capricornus: 0, aquarius: 0, pisces: 0, angel: 0, universal: 0};
-                storage.myconstellation.insert(identity, _constellation);
+                storage.myconstellation.insert((identity, _epoch), _constellation);
             }else if random == 9 {
                 let _constellation = Constellation{aries: 0, taurus: 0, gemini: 0, cancer: 0, leo: 0, virgo: 0, libra: 0, scorpio: 0, sagittarius: 1, capricornus: 0, aquarius: 0, pisces: 0, angel: 0, universal: 0};
-                storage.myconstellation.insert(identity, _constellation);
+                storage.myconstellation.insert((identity, _epoch), _constellation);
             }else if random == 10 {
                 let _constellation = Constellation{aries: 0, taurus: 0, gemini: 0, cancer: 0, leo: 0, virgo: 0, libra: 0, scorpio: 0, sagittarius: 0, capricornus: 1, aquarius: 0, pisces: 0, angel: 0, universal: 0};
-                storage.myconstellation.insert(identity, _constellation);
+                storage.myconstellation.insert((identity, _epoch), _constellation);
             }else if random == 11 {
                 let _constellation = Constellation{aries: 0, taurus: 0, gemini: 0, cancer: 0, leo: 0, virgo: 0, libra: 0, scorpio: 0, sagittarius: 0, capricornus: 0, aquarius: 1, pisces: 0, angel: 0, universal: 0};
-                storage.myconstellation.insert(identity, _constellation);
+                storage.myconstellation.insert((identity, _epoch), _constellation);
             }else {
                 let _constellation = Constellation{aries: 0, taurus: 0, gemini: 0, cancer: 0, leo: 0, virgo: 0, libra: 0, scorpio: 0, sagittarius: 0, capricornus: 0, aquarius: 0, pisces: 1, angel: 0, universal: 0};
-                storage.myconstellation.insert(identity, _constellation);
+                storage.myconstellation.insert((identity, _epoch), _constellation);
             }
         }
         let mut _monster = monster.unwrap();
@@ -421,17 +613,38 @@ impl Game for Contract {
         //update
         storage.mymonster.insert(identity, _monster);
 
+        //check epoch time and update
+        let _epoch_time = storage.epoch_time.read();
+        if (timestamp() > _epoch_time + EPOCHDIFF) && (_epoch > 0) {
+            storage.epoch_time.write(timestamp());
+            storage.epoch.write(_epoch + 1);
+        }
+
     }
 
+    #[payable]
     #[storage(read, write)]
     fn combine_constellation(){
         let identity = msg_sender().unwrap();
-        let constellation = storage.myconstellation.get(identity).try_read();
+        let _epoch = storage.epoch.read();
+        let constellation = storage.myconstellation.get((identity, _epoch)).try_read();
         let point = storage.mypoints.get(identity).try_read();
         require(
             constellation.is_some(),
-            ConstellationError::NotAvailable,
+            AvailableError::NotAvailable,
         );
+
+        //get asset id
+        // let token_contract = abi(Token, storage.token_contract_id.read());
+        // let asset_id = token_contract.getAssetId(); 
+
+        // Verify payment
+        require(AssetId::from(storage.asset_id.read()) == msg_asset_id(), AssetError::IncorrectAssetSent);
+        require(
+            storage.combine_price.read() <= msg_amount(),
+            AssetError::InsufficientPayment,
+        );
+
         let mut _constellation = constellation.unwrap();
         require(
             _constellation.aries > 0 && _constellation.taurus > 0 && _constellation.gemini > 0 && _constellation.cancer > 0 && _constellation.leo > 0 && _constellation.virgo > 0 && _constellation.libra > 0 && _constellation.scorpio > 0 && _constellation.sagittarius > 0  && _constellation.capricornus > 0  && _constellation.aquarius > 0  && _constellation.pisces > 0,
@@ -451,7 +664,7 @@ impl Game for Contract {
         _constellation.pisces = _constellation.pisces - 1;
         _constellation.angel = _constellation.angel + 1;
         //update
-        storage.myconstellation.insert(identity, _constellation);
+        storage.myconstellation.insert((identity, _epoch), _constellation);
         if(point.is_some()){
             let mut _point = point.unwrap();
             _point = _point + 10;
@@ -462,25 +675,33 @@ impl Game for Contract {
         }
     }
 
+    #[payable]
     #[storage(read, write)]
     fn regenerate_gene(){
         let identity = msg_sender().unwrap();
         let monster = storage.mymonster.get(identity).try_read();
         require(
             monster.is_some(),
-            MonsterError::NotAvailable,
+            AvailableError::NotAvailable,
         );
         require(
             timestamp() > monster.unwrap().genetime + ONEDAY,
             TimeError::NotEnoughTime,
         );
 
+        // Verify payment
+        require(AssetId::base() == msg_asset_id(), AssetError::IncorrectAssetSent);
+        require(
+            storage.gene_price.read() <= msg_amount(),
+            AssetError::InsufficientPayment,
+        );
+       
+
          // Omitting the processing algorithm for random numbers
         let _geni = 12020329928232323;
         let _bonus = 5;
         // Omitting the processing algorithm for random numbers
 
-        //generate bonus
         let mut _monster = monster.unwrap();
         _monster.gene = _geni.unwrap();
         _monster.bonus = _bonus;
@@ -491,20 +712,65 @@ impl Game for Contract {
 
     }
 
+    #[payable]
     #[storage(read, write)]
-    fn list_constellation(_styles: u8) -> b256 {
+    fn rebirth(){
         let identity = msg_sender().unwrap();
         let monster = storage.mymonster.get(identity).try_read();
         require(
             monster.is_some(),
-            MonsterError::NotAvailable,
+            AvailableError::NotAvailable,
+        );
+        require(
+            timestamp() > monster.unwrap().expiry,
+            TimeError::NotEnoughTime,
+        );
+
+        // Verify payment
+        require(AssetId::base() == msg_asset_id(), AssetError::IncorrectAssetSent);
+        require(
+            storage.monster_price.read() <= msg_amount(),
+            AssetError::InsufficientPayment,
+        );
+
+         // Omitting the processing algorithm for random numbers
+        let _expiry = 3;
+        // Omitting the processing algorithm for random numbers
+
+        let mut _monster = monster.unwrap();
+        _monster.expiry = timestamp()+ ONEDAY*_expiry;
+        //update
+        storage.mymonster.insert(identity, _monster);
+
+    }
+
+    #[payable]
+    #[storage(read, write)]
+    fn list_constellation(_styles: u8) -> b256 {
+        let identity = msg_sender().unwrap();
+        let _epoch = storage.epoch.read();
+        let monster = storage.mymonster.get(identity).try_read();
+        require(
+            monster.is_some(),
+            AvailableError::NotAvailable,
+        );
+
+        //get asset id
+        // let token_contract = abi(Token, storage.token_contract_id.read());
+        // let asset_id = token_contract.getAssetId(); 
+
+        // Verify payment
+        require(AssetId::from(storage.asset_id.read()) == msg_asset_id(), AssetError::IncorrectAssetSent);
+        require(
+            storage.battle_price.read() <= msg_amount(),
+            AssetError::InsufficientPayment,
         );
 
         //sub constella
-        let constellation = storage.myconstellation.get(identity).try_read();
+        let constellation = storage.myconstellation.get((identity, _epoch)).try_read();
         require(
             constellation.is_some(),
-            ConstellationError::NotAvailable,
+            AvailableError::NotAvailable,
         );
 
         let mut _constellation = constellation.unwrap();
@@ -583,34 +849,37 @@ impl Game for Contract {
         }
 
         //update
-        storage.myconstellation.insert(identity, _constellation);
+        storage.myconstellation.insert((identity, _epoch), _constellation);
 
-        //generate hash 
-        let random = 10;
+        let random_contract = abi(Random, storage.random_contract_id.read());
+        let random = random_contract.getRandom(); 
+
         let listid: b256 = sha256((timestamp(), msg_sender().unwrap(), random, _styles));
         
         // Store Market
-        let market = Market{owner: identity, ownergene: monster.unwrap().gene, constella: _styles.as_u16()};
+        let market = Market{owner: identity, ownergene: monster.unwrap().gene, constella: _styles.as_u16(), epoch: _epoch};
         storage.markets.insert(listid, market);
         listid
     }
 
+    #[payable]
     #[storage(read, write)]
     fn delist_constellation(_listid: b256){
         let identity = msg_sender().unwrap();
+        let _epoch = storage.epoch.read();
         let market = storage.markets.get(_listid).try_read();
         require(
             market.is_some(),
-            MarketError::NotAvailable,
+            AvailableError::NotAvailable,
         );
         require(
-            market.unwrap().constella > 0,
-            MarketError::NotAvailable,
+            market.unwrap().constella > 0 && market.unwrap().owner == identity && market.unwrap().epoch == _epoch,
+            AvailableError::NotAvailable,
         );
-        let my_constellation = storage.myconstellation.get(identity).try_read();
+        let my_constellation = storage.myconstellation.get((identity, _epoch)).try_read();
         require(
             my_constellation.is_some(),
-            ConstellationError::NotAvailable,
+            AvailableError::NotAvailable,
         );
         let mut _my_constellation = my_constellation.unwrap();
         let _market = market.unwrap();
@@ -642,12 +911,19 @@ impl Game for Contract {
         }
 
         //update
-        storage.myconstellation.insert(identity, _my_constellation);
+        storage.myconstellation.insert((identity, _epoch), _my_constellation);
 
         // let newmarket = Market{owner: Identity::Address(Address::zero()), ownergene: 0, constella: 0};
         // storage.markets.insert(_listid, newmarket);
+
         storage.markets.remove(_listid);
 
+        //get asset id
+        // let token_contract = abi(Token, storage.token_contract_id.read());
+        // let asset_id = token_contract.getAssetId(); 
+
+        //tranfer token to owner back
+        transfer(identity, AssetId::from(storage.asset_id.read()), storage.battle_price.read());
 
 
     }
@@ -657,24 +933,38 @@ impl Game for Contract {
         storage.markets.get(_listid).try_read()
     }
 
+    #[payable]
     #[storage(read, write)]
     fn battle(_use_styles: u8, _listid: b256) -> bool{
         let identity = msg_sender().unwrap();
+        let _epoch = storage.epoch.read();
         let monster = storage.mymonster.get(identity).try_read();
         let market = storage.markets.get(_listid).try_read();
         require(
             monster.is_some(),
-            MonsterError::NotAvailable,
+            AvailableError::NotAvailable,
         );
         require(
             market.is_some(),
-            MarketError::NotAvailable,
+            AvailableError::NotAvailable,
         );
+
+        //get asset id
+        // let token_contract = abi(Token, storage.token_contract_id.read());
+        // let asset_id = token_contract.getAssetId(); 
+
+        // Verify payment
+        require(AssetId::from(storage.asset_id.read()) == msg_asset_id(), AssetError::IncorrectAssetSent);
+        require(
+            storage.battle_price.read() <= msg_amount(),
+            AssetError::InsufficientPayment,
+        );
+
         //check user has card
-        let my_constellation = storage.myconstellation.get(identity).try_read();
+        let my_constellation = storage.myconstellation.get((identity, _epoch)).try_read();
         require(
                 my_constellation.is_some(),
-                ConstellationError::NotAvailable,
+                AvailableError::NotAvailable,
         );
         let mut _my_constellation = my_constellation.unwrap();
 
@@ -742,8 +1032,8 @@ impl Game for Contract {
 
         //check market info, styles > 0
         require(
-            market.unwrap().constella > 0,
-            MarketError::NotAvailable,
+            market.unwrap().constella > 0 && market.unwrap().epoch == _epoch && market.unwrap().owner != identity,
+            AvailableError::NotAvailable,
         );
 
          // Omitting the processing algorithm for random numbers
@@ -753,10 +1043,10 @@ impl Game for Contract {
         if _random == 1 {
             //you fail
             // add card to owner, delete card from you
-            let owner_constellation = storage.myconstellation.get(market.unwrap().owner).try_read();
+            let owner_constellation = storage.myconstellation.get((market.unwrap().owner, _epoch)).try_read();
             require(
                 owner_constellation.is_some(),
-                ConstellationError::NotAvailable,
+                AvailableError::NotAvailable,
             );
             
             let mut _owner_constellation = owner_constellation.unwrap();
@@ -799,8 +1089,11 @@ impl Game for Contract {
                 _owner_constellation.pisces = _owner_constellation.pisces + 1;
             }
             //update
-            storage.myconstellation.insert(identity, _my_constellation);
-            storage.myconstellation.insert(identity, _owner_constellation);
+            storage.myconstellation.insert((identity, _epoch), _my_constellation);
+            storage.myconstellation.insert((market.unwrap().owner, _epoch), _owner_constellation);
+
+            //tranfer token to winner
+            transfer(market.unwrap().owner, AssetId::from(storage.asset_id.read()), storage.battle_price.read());
 
         }else {
             //you win
@@ -833,11 +1126,15 @@ impl Game for Contract {
                 _my_constellation.pisces = _my_constellation.pisces + 1;
             }
 
-            let newmarket = Market{owner: Identity::Address(Address::zero()), ownergene: 0, constella: 0};
-            storage.markets.insert(_listid, newmarket);
+            // let newmarket = Market{owner: Identity::Address(Address::zero()), ownergene: 0, constella: 0};
+            // storage.markets.insert(_listid, newmarket);
+            storage.markets.remove(_listid);
 
             //update
-            storage.myconstellation.insert(identity, _my_constellation);
+            storage.myconstellation.insert((identity, _epoch), _my_constellation);
+
+            //tranfer token to winner
+            transfer(market.unwrap().owner, AssetId::from(storage.asset_id.read()), storage.battle_price.read() * 2);
 
             // return true;
         }
@@ -863,18 +1160,27 @@ impl Game for Contract {
             storage.mypoints.insert(identity, 1);
         }
 
+        //check epoch time and update
+        let _epoch_time = storage.epoch_time.read();
+        if (timestamp() > _epoch_time + EPOCHDIFF) && (_epoch > 0) {
+            storage.epoch_time.write(timestamp());
+            storage.epoch.write(_epoch + 1);
+        }
+
         return _random != 1;
 
 
     }
 
+    #[payable]
     #[storage(read, write)]
     fn lucky_turntable(){
         let identity = msg_sender().unwrap();
+        let _epoch = storage.epoch.read();
         let monster = storage.mymonster.get(identity).try_read();
         require(
             monster.is_some(),
-            MonsterError::NotAvailable,
+            AvailableError::NotAvailable,
         );
 
         require(
@@ -882,12 +1188,25 @@ impl Game for Contract {
             TimeError::NotEnoughTime,
         );
 
-         // Omitting the processing algorithm for random numbers
+        //get asset id
+        // let token_contract = abi(Token, storage.token_contract_id.read());
+        // let asset_id = token_contract.getAssetId(); 
+
+        // Verify payment
+        require(AssetId::from(storage.asset_id.read()) == msg_asset_id(), AssetError::IncorrectAssetSent);
+        require(
+            storage.lucky_price.read() <= msg_amount(),
+            AssetError::InsufficientPayment,
+        );
+
+        // Omitting the processing algorithm for random numbers
         let _random = 3;
         // Omitting the processing algorithm for random numbers
 
         let mut _monster = monster.unwrap();
         _monster.turntabletime = timestamp();
+        //update todo
+
         if _random == 1 {
             //add apple
             let fruit = storage.myfruit.get(identity).try_read();
@@ -955,17 +1274,24 @@ impl Game for Contract {
             
         }else{
             //add universal card
-            let constellation = storage.myconstellation.get(identity).try_read();
+            let constellation = storage.myconstellation.get((identity, _epoch)).try_read();
             if constellation.is_some() {
                 let mut _constellation = constellation.unwrap();
                 _constellation.universal = _constellation.universal + 1;
                 //update
-                storage.myconstellation.insert(identity, _constellation);
+                storage.myconstellation.insert((identity, _epoch), _constellation);
             }else{
                 let _constellation = Constellation{aries: 0, taurus: 0, gemini: 0, cancer: 0, leo: 0, virgo: 0, libra: 0, scorpio: 0, sagittarius: 0, capricornus: 0, aquarius: 0, pisces: 0, angel: 0, universal: 1};
-                storage.myconstellation.insert(identity, _constellation);
+                storage.myconstellation.insert((identity, _epoch), _constellation);
             }
             
+        }
+        
+        //check epoch time and update
+        let _epoch_time = storage.epoch_time.read();
+        if (timestamp() > _epoch_time + EPOCHDIFF) && (_epoch > 0) {
+            storage.epoch_time.write(timestamp());
+            storage.epoch.write(_epoch + 1);
         }
 
     }
@@ -973,10 +1299,11 @@ impl Game for Contract {
     #[storage(read, write)]
     fn use_universal_card(_styles: u8){
         let identity = msg_sender().unwrap();
-        let constellation = storage.myconstellation.get(identity).try_read();
+        let _epoch = storage.epoch.read();
+        let constellation = storage.myconstellation.get((identity, _epoch)).try_read();
         require(
             constellation.is_some(),
-            ConstellationError::NotAvailable,
+            AvailableError::NotAvailable,
         );
         let mut _constellation = constellation.unwrap();
         require(
@@ -1010,12 +1337,22 @@ impl Game for Contract {
             _constellation.pisces = _constellation.pisces + 1;
         }
         //update
-        storage.myconstellation.insert(identity, _constellation);
-
+        storage.myconstellation.insert((identity, _epoch), _constellation);
     }
 
+    #[payable]
     #[storage(read, write)]
-    fn buy_coin(){
+    fn buy_coin(amount: u64){
+        // Verify payment
+        require(AssetId::base() == msg_asset_id(), AssetError::IncorrectAssetSent);
+        require(
+            (amount/(storage.token_price.read())) <= msg_amount(),
+            AssetError::InsufficientPayment,
+        );
+
+        let token_contract = abi(Token, storage.token_contract_id.read());
+        token_contract.mint(msg_sender().unwrap(), DEFAULT_SUB_ID, amount); 
 
     }
+
 }
