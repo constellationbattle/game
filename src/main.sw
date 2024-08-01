@@ -61,7 +61,6 @@ abi Game {
     #[payable, storage(read, write)]
     fn list_constellation(_styles: u8) -> b256;
 
-    #[payable, storage(read, write)]
     #[storage(read, write)]
     fn delist_constellation(_listid: b256);
 
@@ -862,7 +861,6 @@ impl Game for Contract {
         listid
     }
 
-    #[payable]
     #[storage(read, write)]
     fn delist_constellation(_listid: b256){
         let identity = msg_sender().unwrap();
