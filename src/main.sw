@@ -2,10 +2,19 @@ contract;
 
 abi Game {
     #[storage(read, write)]
+    fn set_free_mint(_true_false: bool);
+
+    #[storage(read, write)]
     fn set_random_contract(_contract_id: b256);
 
     #[storage(read, write)]
     fn set_token_contract(_contract_id: b256);
+
+    #[storage(read, write)]
+    fn set_third_contract(_contract_id: b256);
+
+    #[storage(read, write)]
+    fn set_point_owner(_indentity: Identity);
 
     #[storage(read, write)]
     fn set_asset_id(_asset_id: b256);
@@ -26,7 +35,13 @@ abi Game {
     fn set_monster_price(_monster_price: u64);
 
     #[storage(read, write)]
+    fn set_rebirth_price(_rebirth_price: u64);
+
+    #[storage(read, write)]
     fn set_gene_price(_gene_price: u64);
+
+    #[storage(read, write)]
+    fn add_airdrop_phase();
 
     #[storage(read, write)]
     fn set_token_price(_token_price: u64);
@@ -34,8 +49,14 @@ abi Game {
     #[payable, storage(read, write)]
     fn mint_monster();
 
+    #[storage(read, write)]
+    fn free_mint_monster();
+
     #[storage(read)]
     fn get_my_info()->(Option<Monster>, Option<Fruit>, Option<Constellation>, Option<Accelerator>, Option<u64>, u64, u64);
+
+    #[storage(read)]
+    fn get_my_point(_indentity: Identity, _airdrop_phase: u64)->Option<u64>;
 
     #[payable, storage(read, write)]
     fn buy_fruit(_styles: u8, _amount: u16);
@@ -64,14 +85,18 @@ abi Game {
     #[payable, storage(read, write)]
     fn list_constellation(_styles: u8) -> b256;
 
+    #[payable, storage(read, write)]
     #[storage(read, write)]
     fn delist_constellation(_listid: b256);
 
-     #[storage(read)]
+    #[storage(read)]
     fn get_market(_listid: b256) -> Option<Market>;
 
     #[payable, storage(read, write)]
     fn battle(_use_styles: u8, _listid: b256) -> bool;
+
+    #[storage(read, write)]
+    fn add_accelerator();
 
     #[payable, storage(read, write)]
     fn lucky_turntable();
@@ -81,6 +106,9 @@ abi Game {
 
     #[payable, storage(read, write)]
     fn buy_coin(amount: u64);
+
+    #[storage(read, write)]
+    fn claim_point(_identity: Identity, _airdrop_phase: u64, amount: u64);
 
 }
 
@@ -92,9 +120,11 @@ abi Random {
 abi Token {
     #[storage(read, write)]
     fn mint(recipient: Identity, sub_id: SubId, amount: u64);
+}
 
-    // #[storage(read)]
-    // fn getAssetId() -> AssetId;
+abi ThirdContract {
+    #[storage(read)]
+    fn get_eligible(identity: Identity) -> bool;
 }
 
 use std::{
@@ -119,6 +149,7 @@ use std::logging::log;
 
 enum MintError {
     AlreadyMinted: (),
+    FreeMintNotOpen: (),
 }
 
 enum AmountError {
@@ -185,6 +216,7 @@ struct Constellation{
 struct Market{
     owner: Identity,
     ownergene: u64,
+    bonus: u64,
     constella: u16,
     epoch: u64,
 }
@@ -192,6 +224,7 @@ struct Market{
 
 configurable {
     ADMIN: Identity = Identity::Address(Address::from(0xb9d62dec6e8b87e495772cd81862db31394bfc3b4d1cb6e04c530f21e3ac1f80)),
+    AIRDROP: Identity = Identity::Address(Address::from(0xb9d62dec6e8b87e495772cd81862db31394bfc3b4d1cb6e04c530f21e3ac1f80)),
     ONEDAY: u64 = 60*5*1,
     TWODAYS: u64 = 60*5*2,
     THREEDAYS: u64 = 60*5*3,
@@ -203,9 +236,12 @@ configurable {
 }
 
 storage {
+    free_mint: bool = false,
     epoch: u64 = 0,
     epoch_time: u64 = 0,
+    airdrop_phase: u64 = 1,
     monster_price: u64 = 100000,
+    rebirth_price: u64 = 100000,
     gene_price: u64 = 100000,
     apple_price: u64 = 100000,
     banana_price: u64 = 200000,
@@ -215,22 +251,35 @@ storage {
     battle_price: u64 = 10*1000000000,
     token_price: u64 = 1000000, //1000000 token/eth
     total_bonus: u64 = 0,
+    total_point: StorageMap<u64, u64> = StorageMap {},
     mymonster: StorageMap<Identity, Monster> = StorageMap {},
     myfruit: StorageMap<Identity, Fruit> = StorageMap {},
     myconstellation: StorageMap<(Identity, u64), Constellation> = StorageMap {},
     my_share_bonus: StorageMap<(Identity, u64), u64> = StorageMap {},
+    my_name_accelerator: StorageMap<(Identity, u64), bool> = StorageMap {},
     epoch_total_share: StorageMap<u64, u64> = StorageMap {}, // epoch_should_bonus/epoch_total_share for one share bonus
     epoch_should_bonus: StorageMap<u64, u64> = StorageMap {},
     epoch_total_bonus: StorageMap<u64, u64> = StorageMap {},
     myaccelerator: StorageMap<Identity, Accelerator> = StorageMap {},
-    mypoints: StorageMap<Identity, u64> = StorageMap {},
+    mypoints: StorageMap<(Identity, u64), u64> = StorageMap {},
     markets: StorageMap<b256, Market> = StorageMap {},
     random_contract_id: b256 = 0xb9d62dec6e8b87e495772cd81862db31394bfc3b4d1cb6e04c530f21e3ac1f80,
     token_contract_id: b256 = 0xb9d62dec6e8b87e495772cd81862db31394bfc3b4d1cb6e04c530f21e3ac1f80,
+    third_contract_id: b256 = 0xb9d62dec6e8b87e495772cd81862db31394bfc3b4d1cb6e04c530f21e3ac1f80,
     asset_id: b256 = 0xb9d62dec6e8b87e495772cd81862db31394bfc3b4d1cb6e04c530f21e3ac1f80,
+    point_owner: Identity = Identity::ContractId(ContractId::from(0xb9d62dec6e8b87e495772cd81862db31394bfc3b4d1cb6e04c530f21e3ac1f80)),
 }
 
 impl Game for Contract {
+    #[storage(read, write)]
+    fn set_free_mint(_true_false: bool){
+        require(
+            msg_sender().unwrap() == ADMIN, 
+            AuthorizationError::SenderNotOwner,
+        );
+        storage.free_mint.write(_true_false);
+    }
+
     #[storage(read, write)]
     fn set_random_contract(_contract_id: b256){
         require(
@@ -247,6 +296,24 @@ impl Game for Contract {
             AuthorizationError::SenderNotOwner,
         );
         storage.token_contract_id.write(_contract_id);
+    }
+
+    #[storage(read, write)]
+    fn set_third_contract(_contract_id: b256){
+        require(
+            msg_sender().unwrap() == ADMIN, 
+            AuthorizationError::SenderNotOwner,
+        );
+        storage.third_contract_id.write(_contract_id);
+    }
+
+     #[storage(read, write)]
+    fn set_point_owner(_indentity: Identity){
+        require(
+            msg_sender().unwrap() == ADMIN, 
+            AuthorizationError::SenderNotOwner,
+        );
+        storage.point_owner.write(_indentity);
     }
 
     #[storage(read, write)]
@@ -310,12 +377,30 @@ impl Game for Contract {
     }
 
     #[storage(read, write)]
+    fn set_rebirth_price(_rebirth_price: u64){
+        require(
+            msg_sender().unwrap() == ADMIN, 
+            AuthorizationError::SenderNotOwner,
+        );
+        storage.rebirth_price.write(_rebirth_price);
+    }
+
+    #[storage(read, write)]
     fn set_gene_price(_gene_price: u64){
         require(
             msg_sender().unwrap() == ADMIN, 
             AuthorizationError::SenderNotOwner,
         );
         storage.gene_price.write(_gene_price);
+    }
+
+    #[storage(read, write)]
+    fn add_airdrop_phase(){
+         require(
+            msg_sender().unwrap() == ADMIN, 
+            AuthorizationError::SenderNotOwner,
+        );
+        storage.airdrop_phase.write(storage.airdrop_phase.read() + 1);
     }
 
     #[storage(read, write)]
@@ -336,7 +421,6 @@ impl Game for Contract {
             MintError::AlreadyMinted,
         );
 
-        
         if storage.epoch.read() == 0 {
             storage.epoch.write(1);
             storage.epoch_time.write(timestamp());
@@ -345,18 +429,22 @@ impl Game for Contract {
             let _epoch_time = storage.epoch_time.read();
             if (timestamp() > _epoch_time + EPOCHDIFF) && (storage.epoch.read() > 0) {
                 storage.epoch_time.write(timestamp());
+                let last_epoch = storage.epoch.read();
                 storage.epoch.write(storage.epoch.read() + 1);
+                deal_bonus(last_epoch);
             }
         }
         let _epoch = storage.epoch.read();
         
-
         // Verify payment
         require(AssetId::base() == msg_asset_id(), AssetError::IncorrectAssetSent);
         require(
             storage.monster_price.read() <= msg_amount(),
             AssetError::InsufficientPayment,
         );
+        // do allocation
+        transfer(ADMIN, AssetId::base(), (msg_amount()*10)/100);
+        transfer(AIRDROP, AssetId::base(), (msg_amount()*40)/100);
 
         //caculate bonus
         storage.total_bonus.write(storage.total_bonus.read() + storage.monster_price.read());
@@ -375,7 +463,75 @@ impl Game for Contract {
         // Store monster
         let monster = Monster{gene: _geni.unwrap(), starttime: timestamp(), genetime:timestamp(), cardtime: timestamp(), turntabletime: timestamp(), expiry: timestamp()+ ONEDAY*_expiry, bonus: _bonus};
         storage.mymonster.insert(identity, monster);
+        
+        //add 10 point
+        let airdropphase = storage.airdrop_phase.read();
+        let point = storage.mypoints.get((identity, airdropphase)).try_read();
+        if(point.is_some()){
+            let mut _point = point.unwrap();
+            _point = _point + 10;
+            //update
+            storage.mypoints.insert((identity, airdropphase), _point);
+        }else{
+            storage.mypoints.insert((identity, airdropphase), 10);
+        }
+        //add total point
+        let totalpoint = storage.total_point.get(airdropphase).try_read();
+        if totalpoint.is_some(){
+            let mut _totalpoint = totalpoint.unwrap();
+            _totalpoint = _totalpoint + 10;
+            storage.total_point.insert(airdropphase, _totalpoint);
+        }else{
+            storage.total_point.insert(airdropphase, 10);
+        }
+        
+    }
 
+    #[storage(read, write)]
+    fn free_mint_monster(){
+        let identity = msg_sender().unwrap();
+        let record = storage.mymonster.get(identity).try_read();
+        require(
+            record.is_none(),
+            MintError::AlreadyMinted,
+        );
+
+        require(
+            storage.free_mint.read(),
+            MintError::FreeMintNotOpen,
+        );
+
+        let third_contract = abi(ThirdContract, storage.third_contract_id.read());
+        let _myeligible = third_contract.get_eligible(identity);
+        require(
+            _myeligible,
+            AvailableError::NotAvailable,
+        );
+
+        if storage.epoch.read() == 0 {
+            storage.epoch.write(1);
+            storage.epoch_time.write(timestamp());
+        }else{
+            //check epoch time and update
+            let _epoch_time = storage.epoch_time.read();
+            if (timestamp() > _epoch_time + EPOCHDIFF) && (storage.epoch.read() > 0) {
+                storage.epoch_time.write(timestamp());
+                let last_epoch = storage.epoch.read();
+                storage.epoch.write(storage.epoch.read() + 1);
+                deal_bonus(last_epoch);
+            }
+        }
+
+
+        // Omitting the processing algorithm for random numbers
+        let _geni = 12020329928232323;
+        let _bonus = 5; 
+        let _expiry = 3;
+        // Omitting the processing algorithm for random numbers
+
+        // Store monster
+        let monster = Monster{gene: _geni.unwrap(), starttime: timestamp(), genetime:timestamp(), cardtime: timestamp(), turntabletime: timestamp(), expiry: timestamp()+ ONEDAY*_expiry, bonus: _bonus};
+        storage.mymonster.insert(identity, monster);
     }
 
     #[storage(read)]
@@ -386,11 +542,16 @@ impl Game for Contract {
          storage.myfruit.get(identity).try_read(), 
          storage.myconstellation.get((identity, _epoch)).try_read(), 
          storage.myaccelerator.get(identity).try_read(),
-         storage.mypoints.get(identity).try_read(),
+         storage.mypoints.get((identity, storage.airdrop_phase.read())).try_read(),
          storage.epoch.read(),
          storage.epoch_time.read(),
         )
 
+    }
+
+    #[storage(read)]
+    fn get_my_point(_indentity: Identity, _airdrop_phase: u64)->Option<u64>{
+        storage.mypoints.get((_indentity, _airdrop_phase)).try_read()
     }
 
     #[payable]
@@ -398,6 +559,10 @@ impl Game for Contract {
     fn buy_fruit(_styles: u8, _amount: u16){
         let identity = msg_sender().unwrap();
         let fruit = storage.myfruit.get(identity).try_read();
+        let monster = storage.mymonster.get(identity).try_read();
+        require(monster.is_some(),
+            AvailableError::NotAvailable,
+        );
         require(
             _amount > 0,
             AmountError::NeedAboveZero,
@@ -420,6 +585,9 @@ impl Game for Contract {
                 AssetError::InsufficientPayment,
             );
         }
+        // do allocation
+        transfer(ADMIN, AssetId::base(), (msg_amount()*10)/100);
+        transfer(AIRDROP, AssetId::base(), (msg_amount()*40)/100);
         
         if storage.epoch.read() == 0 {
             storage.epoch.write(1);
@@ -584,7 +752,9 @@ impl Game for Contract {
         let _epoch_time = storage.epoch_time.read();
         if (timestamp() > _epoch_time + EPOCHDIFF) && (storage.epoch.read() > 0) {
             storage.epoch_time.write(timestamp());
+            let last_epoch = storage.epoch.read();
             storage.epoch.write(storage.epoch.read() + 1);
+            deal_bonus(last_epoch);
         }
 
         let _epoch = storage.epoch.read();
@@ -676,7 +846,9 @@ impl Game for Contract {
         let identity = msg_sender().unwrap();
         let _epoch = storage.epoch.read();
         let constellation = storage.myconstellation.get((identity, _epoch)).try_read();
-        let point = storage.mypoints.get(identity).try_read();
+        let airdropphase = storage.airdrop_phase.read();
+        let point = storage.mypoints.get((identity, airdropphase)).try_read();
+        // let point = storage.mypoints.get(identity).try_read();
         require(
             constellation.is_some(),
             AvailableError::NotAvailable,
@@ -742,20 +914,35 @@ impl Game for Contract {
         _constellation.angel = _constellation.angel + 1;
         //update
         storage.myconstellation.insert((identity, _epoch), _constellation);
+
+        //update point
         if(point.is_some()){
             let mut _point = point.unwrap();
             _point = _point + 10;
             //update
-            storage.mypoints.insert(identity, _point);
+            storage.mypoints.insert((identity, airdropphase), _point);
         }else{
-            storage.mypoints.insert(identity, 10);
+            storage.mypoints.insert((identity, airdropphase), 10);
+        }
+        //add total point
+        let totalpoint = storage.total_point.get(airdropphase).try_read();
+        if totalpoint.is_some(){
+            let mut _totalpoint = totalpoint.unwrap();
+            _totalpoint = _totalpoint + 10;
+            storage.total_point.insert(airdropphase, _totalpoint);
+        }else{
+            storage.total_point.insert(airdropphase, 10);
         }
 
          //check epoch time and update
         let _epoch_time = storage.epoch_time.read();
         if (timestamp() > _epoch_time + EPOCHDIFF) && (_epoch > 0) {
             storage.epoch_time.write(timestamp());
-            storage.epoch.write(_epoch + 1);
+            // storage.epoch.write(_epoch + 1);
+            let last_epoch = storage.epoch.read();
+            storage.epoch.write(storage.epoch.read() + 1);
+            deal_bonus(last_epoch);
+            
         }
     }
 
@@ -776,33 +963,14 @@ impl Game for Contract {
         let _should_bonus = storage.epoch_should_bonus.get(_epoch).try_read();
         let _epoch_total_bonus = storage.epoch_total_bonus.get(_epoch).try_read();
         require(
-            _epoch_total_bonus.is_some(),
+            _epoch_total_bonus.is_some() && _should_bonus.is_some(),
             AvailableError::NotAvailable,
         );
         
-        if _should_bonus.is_some() {
-            let each_share = _should_bonus.unwrap() / _total_share.unwrap();
-            let my_bonus = each_share * _my_share.unwrap();
-            storage.my_share_bonus.remove((identity, _epoch));
-            transfer(identity, AssetId::base(), my_bonus);
-        }else{
-            if _epoch == current_epoch - 1 {
-                storage.total_bonus.write(storage.total_bonus.read() - _epoch_total_bonus.unwrap()/2);
-                let _total_bonus = storage.total_bonus.read();
-                let should_bonus = _epoch_total_bonus.unwrap() / 2 + _total_bonus*20 /100 ;
-                storage.total_bonus.write(_total_bonus * 80 / 100);
-                storage.epoch_should_bonus.insert(_epoch, should_bonus);
-
-                let each_share = should_bonus / _total_share.unwrap();
-                let my_bonus = each_share * _my_share.unwrap();
-                storage.my_share_bonus.remove((identity, _epoch));
-                transfer(identity, AssetId::base(), my_bonus);
-            }else{
-                //if no claim in last epoch, how to deal with total_bonus?
-
-            }
-            
-        }
+        let each_share = _should_bonus.unwrap() / _total_share.unwrap();
+        let my_bonus = each_share * _my_share.unwrap();
+        storage.my_share_bonus.remove((identity, _epoch));
+        transfer(identity, AssetId::base(), my_bonus);
 
     }
 
@@ -831,12 +999,17 @@ impl Game for Contract {
             storage.gene_price.read() <= msg_amount(),
             AssetError::InsufficientPayment,
         );
+        // do allocation
+        transfer(ADMIN, AssetId::base(), (msg_amount()*10)/100);
+        transfer(AIRDROP, AssetId::base(), (msg_amount()*40)/100);
 
         //check epoch time and update
         let _epoch_time = storage.epoch_time.read();
         if (timestamp() > _epoch_time + EPOCHDIFF) && (storage.epoch.read() > 0) {
             storage.epoch_time.write(timestamp());
+            let last_epoch = storage.epoch.read();
             storage.epoch.write(storage.epoch.read() + 1);
+            deal_bonus(last_epoch);
         }
 
         //caculate bonus
@@ -880,9 +1053,12 @@ impl Game for Contract {
         // Verify payment
         require(AssetId::base() == msg_asset_id(), AssetError::IncorrectAssetSent);
         require(
-            storage.monster_price.read() <= msg_amount(),
+            storage.rebirth_price.read() <= msg_amount(),
             AssetError::InsufficientPayment,
         );
+        // do allocation
+        transfer(ADMIN, AssetId::base(), (msg_amount()*10)/100);
+        transfer(AIRDROP, AssetId::base(), (msg_amount()*40)/100);
 
         //check epoch time and update
         let _epoch_time = storage.epoch_time.read();
@@ -919,7 +1095,9 @@ impl Game for Contract {
         let _epoch_time = storage.epoch_time.read();
         if (timestamp() > _epoch_time + EPOCHDIFF) && (storage.epoch.read() > 0) {
             storage.epoch_time.write(timestamp());
+            let last_epoch = storage.epoch.read();
             storage.epoch.write(storage.epoch.read() + 1);
+            deal_bonus(last_epoch);
         }
         let _epoch = storage.epoch.read();
 
@@ -1030,17 +1208,19 @@ impl Game for Contract {
         //update
         storage.myconstellation.insert((identity, _epoch), _constellation);
 
-        //generate gene 
+        // Omitting the processing algorithm for random numbers
         let random = 10;
+        // Omitting the processing algorithm for random numbers
 
         let listid: b256 = sha256((timestamp(), msg_sender().unwrap(), random, _styles));
         
         // Store Market
-        let market = Market{owner: identity, ownergene: monster.unwrap().gene, constella: _styles.as_u16(), epoch: _epoch};
+        let market = Market{owner: identity, ownergene: monster.unwrap().gene, bonus: monster.unwrap().bonus, constella: _styles.as_u16(), epoch: _epoch};
         storage.markets.insert(listid, market);
         listid
     }
 
+    #[payable]
     #[storage(read, write)]
     fn delist_constellation(_listid: b256){//when epoch update, still can get back the card and token
         let identity = msg_sender().unwrap();
@@ -1236,7 +1416,7 @@ impl Game for Contract {
         let _random = 1;
         // Omitting the processing algorithm for random numbers
 
-        if _random == 1 {
+        if _random <= market.unwrap().bonus {
             //you fail
             // add card to owner, delete card from you
             let owner_constellation = storage.myconstellation.get((market.unwrap().owner, _epoch)).try_read();
@@ -1335,36 +1515,77 @@ impl Game for Contract {
             // return true;
         }
         
-
-        let owner_point = storage.mypoints.get(market.unwrap().owner).try_read();
-        let use_point = storage.mypoints.get(identity).try_read();
+        //update point
+        let airdropphase = storage.airdrop_phase.read();
+        let owner_point = storage.mypoints.get((market.unwrap().owner, airdropphase)).try_read();
+        let use_point = storage.mypoints.get((identity, airdropphase)).try_read();
         if(owner_point.is_some()){
             let mut _point = owner_point.unwrap();
             _point = _point + 1;
             //update
-            storage.mypoints.insert(market.unwrap().owner, _point);
+            storage.mypoints.insert((market.unwrap().owner, airdropphase), _point);
         }else{
-            storage.mypoints.insert(market.unwrap().owner, 1);
+            storage.mypoints.insert((market.unwrap().owner, airdropphase), 1);
         }
 
         if(use_point.is_some()){
             let mut _point = use_point.unwrap();
             _point = _point + 1;
             //update
-            storage.mypoints.insert(identity, _point);
+            storage.mypoints.insert((identity, airdropphase), _point);
         }else{
-            storage.mypoints.insert(identity, 1);
+            storage.mypoints.insert((identity, airdropphase), 1);
+        }
+
+        //add total point
+        let totalpoint = storage.total_point.get(airdropphase).try_read();
+        if totalpoint.is_some(){
+            let mut _totalpoint = totalpoint.unwrap();
+            _totalpoint = _totalpoint + 2;
+            storage.total_point.insert(airdropphase, _totalpoint);
+        }else{
+            storage.total_point.insert(airdropphase, 2);
         }
 
         //check epoch time and update
         let _epoch_time = storage.epoch_time.read();
         if (timestamp() > _epoch_time + EPOCHDIFF) && (_epoch > 0) {
             storage.epoch_time.write(timestamp());
+            let last_epoch = storage.epoch.read();
             storage.epoch.write(_epoch + 1);
+            deal_bonus(last_epoch);
         }
 
         return _random != 1;
 
+    }
+
+    #[storage(read, write)]
+    fn add_accelerator(){
+        let identity = msg_sender().unwrap();
+        let third_contract = abi(ThirdContract, storage.third_contract_id.read());
+        let _myeligible = third_contract.get_eligible(identity);
+        require(
+            _myeligible,
+            AvailableError::NotAvailable,
+        );
+        let _epoch = storage.epoch.read();
+        let mynameaccelerator = storage.my_name_accelerator.get((identity, _epoch)).try_read();
+        require(
+            mynameaccelerator.is_none(),
+            AvailableError::NotAvailable,
+        );
+        storage.my_name_accelerator.insert((identity, _epoch), true);
+        let accelerator = storage.myaccelerator.get(identity).try_read();
+        if accelerator.is_some() {
+            let mut _accelerator = accelerator.unwrap();
+            _accelerator.twentyfour_add = _accelerator.twentyfour_add + 1;
+            //update
+            storage.myaccelerator.insert(identity, _accelerator);
+        }else{
+            let _accelerator = Accelerator{eight_add: 0, sixteen_add: 0, twentyfour_add: 1};
+            storage.myaccelerator.insert(identity, _accelerator);
+        }
 
     }
 
@@ -1392,7 +1613,9 @@ impl Game for Contract {
         let _epoch_time = storage.epoch_time.read();
         if (timestamp() > _epoch_time + EPOCHDIFF) && (storage.epoch.read() > 0) {
             storage.epoch_time.write(timestamp());
+            let last_epoch = storage.epoch.read();
             storage.epoch.write(storage.epoch.read() + 1);
+            deal_bonus(last_epoch);
         }
         let _epoch = storage.epoch.read();
 
@@ -1407,9 +1630,10 @@ impl Game for Contract {
             AssetError::InsufficientPayment,
         );
 
-        // Omitting the processing algorithm for random numbers
+       // Omitting the processing algorithm for random numbers
         let _random = 3;
         // Omitting the processing algorithm for random numbers
+        
         let mut _monster = monster.unwrap();
         _monster.turntabletime = timestamp();
         if _random == 1 {
@@ -1438,7 +1662,7 @@ impl Game for Contract {
                 let _fruit = Fruit{apple: 0, banana: 1, ananas: 0};
                 storage.myfruit.insert(identity, _fruit);
             }
-        }else if _random == 3 {
+        }else if (_random > 2) && (_random < 8) {
             //add accelerator_card 8
             let accelerator = storage.myaccelerator.get(identity).try_read();
             if accelerator.is_some() {
@@ -1451,7 +1675,7 @@ impl Game for Contract {
                 storage.myaccelerator.insert(identity, _accelerator);
             }
             
-        }else if _random == 4 {
+        }else if _random == 8 {
             //add accelerator_card 16
             let accelerator = storage.myaccelerator.get(identity).try_read();
             if accelerator.is_some() {
@@ -1464,7 +1688,7 @@ impl Game for Contract {
                 storage.myaccelerator.insert(identity, _accelerator);
             }
             
-        }else if _random == 5 {
+        }else if _random == 9 {
             //add accelerator_card 24
             let accelerator = storage.myaccelerator.get(identity).try_read();
             if accelerator.is_some() {
@@ -1502,7 +1726,9 @@ impl Game for Contract {
         let _epoch_time = storage.epoch_time.read();
         if (timestamp() > _epoch_time + EPOCHDIFF) && (storage.epoch.read() > 0) {
             storage.epoch_time.write(timestamp());
+            let last_epoch = storage.epoch.read();
             storage.epoch.write(storage.epoch.read() + 1);
+            deal_bonus(last_epoch);
         }
         let _epoch = storage.epoch.read();
 
@@ -1598,4 +1824,40 @@ impl Game for Contract {
 
     }
 
+    #[storage(read, write)]
+    fn claim_point(_identity: Identity, _airdrop_phase: u64, amount: u64){
+        require(
+            msg_sender().unwrap() == storage.point_owner.read(), 
+            AuthorizationError::SenderNotOwner,
+        );
+        let point = storage.mypoints.get((_identity, _airdrop_phase)).try_read();
+        require(
+            point.is_some() && point.unwrap() >= amount,
+            AvailableError::NotAvailable,
+        );
+        
+        let mut _point = point.unwrap();
+        _point = _point - amount;
+        //update
+        storage.mypoints.insert((_identity, _airdrop_phase), _point);
+    }
+
+}
+
+#[storage(read, write)]
+fn deal_bonus(_epoch: u64){
+    
+    let current_epoch = storage.epoch.read();
+    require(
+            _epoch > 0 && _epoch + 1 == current_epoch,
+            AvailableError::NotAvailable,
+        );
+    let _should_bonus = storage.epoch_should_bonus.get(_epoch).try_read();
+    let _epoch_total_bonus = storage.epoch_total_bonus.get(_epoch).try_read();
+
+    storage.total_bonus.write(storage.total_bonus.read() - _epoch_total_bonus.unwrap()/2);
+    let _total_bonus = storage.total_bonus.read();
+    let should_bonus = _epoch_total_bonus.unwrap() / 2 + _total_bonus*20 /100 ;
+    storage.total_bonus.write(_total_bonus * 80 / 100);
+    storage.epoch_should_bonus.insert(_epoch, should_bonus);
 }
