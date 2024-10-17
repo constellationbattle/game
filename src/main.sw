@@ -57,6 +57,9 @@ abi Game {
     fn get_my_info(_identity: Identity)->(Option<Monster>, Option<Fruit>, Option<Constellation>, Option<Accelerator>, EpochRef, BattleBonus, InviteBonus, CommunityBonus);
 
     #[storage(read)]
+    fn get_my_expiry_constellation(_identity: Identity, _epoch: u64) -> Option<Constellation>;
+
+    #[storage(read)]
     fn get_total_point(_airdrop_phase: u64)->Option<u64>;
 
     #[storage(read)]
@@ -66,7 +69,7 @@ abi Game {
     fn get_invite_bonus_list(_identity: Identity) -> Vec<BonusList>;
 
     #[storage(read)]
-    fn get_community_bonus_list(_identity: Identity) -> Vec<BonusList>;
+    fn get_community_bonus_list(_identity: Identity) -> Vec<CommunityBonusList>;
 
     #[storage(read)]
     fn get_lucky_banana_universal(_epoch: u64)->(Option<u64>, Option<u64>);
@@ -90,7 +93,7 @@ abi Game {
     fn combine_constellation();
 
     #[storage(read, write)]
-    fn swap_constellation_to_coin(_use_styles: u8, _amount: u16);
+    fn swap_constellation_to_coin(_use_styles: u8, _amount: u16, _epoch: u64);
 
     #[storage(read, write)]
     fn claim_battle_bonus(_epoch: u64);
@@ -146,9 +149,6 @@ abi Game {
     #[storage(read, write)]
     fn airdrop_claim(_amount: u64);
 
-    #[storage(read, write)]
-    fn add_constellation_for_test(_identity: Identity);//delete when deploy on mainnet
-
 }
 
 abi Random {
@@ -158,7 +158,7 @@ abi Random {
 
 abi Token {
     #[storage(read, write)]
-    fn mint(recipient: Identity, sub_id: SubId, amount: u64);
+    fn mint(recipient: Identity, sub_id: Option<SubId>, amount: u64);
 }
 
 abi ThirdContract {
@@ -292,6 +292,8 @@ struct EpochRef{
     my_invite_eligible: Option<bool>,
     my_battle_pool: Option<u64>,
     my_buy_coin: Option<u64>,
+    my_bpoints: Option<u64>,
+    my_bpoints_time: Option<u64>,
 }
 
 struct BattleBonus{
@@ -319,6 +321,16 @@ struct BonusList{
     epoch_should_bonus: Option<u64>,
     epoch_total_weight: Option<u64>,
     my_epoch_weight: Option<u64>,
+    has_claimed: Option<bool>,
+    epoch: u64,
+}
+
+struct CommunityBonusList{
+    epoch_should_bonus: Option<u64>,
+    epoch_total_weight: Option<u64>,
+    my_epoch_weight: Option<u64>,
+    opponent_epoch_weight: Option<u64>,
+    battle_result: Option<u8>, //2 for win, 1 for lose, 3 for tie, none for no battle
     has_claimed: Option<bool>,
     epoch: u64,
 }
@@ -492,6 +504,8 @@ storage {
     third_contract_id: b256 = 0xb9d62dec6e8b87e495772cd81862db31394bfc3b4d1cb6e04c530f21e3ac1f80,
     asset_id: b256 = 0xb9d62dec6e8b87e495772cd81862db31394bfc3b4d1cb6e04c530f21e3ac1f80,
     point_owner: Identity = Identity::ContractId(ContractId::from(0xb9d62dec6e8b87e495772cd81862db31394bfc3b4d1cb6e04c530f21e3ac1f80)),
+    my_bpoints: StorageMap<(Identity, u64), u64> = StorageMap {},//add for battle limitation
+    my_bpoints_time: StorageMap<Identity, u64> = StorageMap {}, //add for battle limitation
 }
 
 impl SRC14 for Contract {
@@ -1038,6 +1052,11 @@ impl Game for Contract {
                     communitybonus
                     );
         }
+    }
+
+    #[storage(read)]
+    fn get_my_expiry_constellation(_identity: Identity, _epoch: u64) -> Option<Constellation>{
+       return storage.myconstellation.get((_identity, _epoch)).try_read();
     }
 
     #[storage(read)]
@@ -1600,9 +1619,9 @@ impl Game for Contract {
     }
 
     #[storage(read, write)]
-    fn swap_constellation_to_coin(_use_styles: u8, _amount: u16){
+    fn swap_constellation_to_coin(_use_styles: u8, _amount: u16, _epoch: u64){
         let identity = msg_sender().unwrap();
-        let _epoch = storage.epoch.read();
+        //let _epoch = storage.epoch.read();
         let constellation = storage.myconstellation.get((identity, _epoch)).try_read();
         require(
             _amount > 0,
@@ -2277,6 +2296,26 @@ impl Game for Contract {
             );
         }
 
+        //check battle limitation
+        let bpoints = storage.my_bpoints.get((identity, _epoch)).try_read();
+        let bpoints_time = storage.my_bpoints_time.get(identity).try_read();
+        if bpoints.is_some() && bpoints_time.is_some() {
+            let mut mybpoints = bpoints.unwrap();
+            if bpoints_time.unwrap() < timestamp() {
+                if (timestamp() - bpoints_time.unwrap()) > storage.one_day.read() {
+                    mybpoints = 0;
+                    storage.my_bpoints.insert((identity, _epoch), mybpoints);
+                }
+            }
+            require(
+                mybpoints < 3,
+                AvailableError::NotAvailable,
+            );
+        }else{
+            storage.my_bpoints.insert((identity, _epoch), 0);
+            storage.my_bpoints_time.insert(identity, timestamp());
+        }
+
         //check market info, styles > 0
         require(
             market.unwrap().constella > 0 && market.unwrap().epoch == _epoch && market.unwrap().owner != identity,
@@ -2289,6 +2328,21 @@ impl Game for Contract {
 
         if _random <= market.unwrap().bonus {
             //you fail
+            //sub bpoints
+            let bpoints_ = storage.my_bpoints.get((identity, _epoch)).try_read();
+            if bpoints_.is_some() {
+                let mut _bpoints = bpoints_.unwrap();
+                if _bpoints > 0 {
+                    _bpoints = _bpoints - 1;
+                    storage.my_bpoints.insert((identity, _epoch), _bpoints);
+                }
+                
+            }else{
+                storage.my_bpoints.insert((identity, _epoch), 0);
+            }
+            
+            storage.my_bpoints_time.insert(identity, timestamp());
+
             //add card to owner, delete card from you, delist owner card, and transfer token to you
             let owner_constellation = storage.myconstellation.get((market.unwrap().owner, _epoch)).try_read();
             require(
@@ -2396,6 +2450,17 @@ impl Game for Contract {
 
         }else {
             //you win
+            //add bpoints
+            let bpoints_ = storage.my_bpoints.get((identity, _epoch)).try_read();
+            if bpoints_.is_some() {
+                let mut _bpoints = bpoints_.unwrap();
+                _bpoints = _bpoints + 1;
+                storage.my_bpoints.insert((identity, _epoch), _bpoints);
+            }else{
+                storage.my_bpoints.insert((identity, _epoch), 1);
+            }
+            storage.my_bpoints_time.insert(identity, timestamp());
+
             //add card to you, remove card from market, transfer token to owner
             let _market = market.unwrap();
 
@@ -3013,45 +3078,6 @@ impl Game for Contract {
         );
         storage.airdrop_balance.write(storage.airdrop_balance.read() - _amount);
         transfer(msg_sender().unwrap(), AssetId::base(), _amount);
-    }
-
-    #[storage(read, write)]
-    fn add_constellation_for_test(_identity: Identity){//delete when deploy on mainnet
-        only_proxy_owner();
-        let monster = storage.mymonster.get(_identity).try_read();
-        require(
-            monster.is_some(),
-            AvailableError::NotAvailable,
-        );
-        //check expiry
-        require(monster.unwrap().expiry > timestamp(),
-            TimeError::Expiry,
-        );
-        let _epoch = storage.epoch.read();
-
-        let constellation = storage.myconstellation.get((_identity, _epoch)).try_read();
-        if constellation.is_some() {
-            let mut _constellation = constellation.unwrap();
-                _constellation.aries = _constellation.aries + 1;
-                _constellation.taurus = _constellation.taurus + 1;
-                _constellation.gemini = _constellation.gemini + 1;
-                _constellation.cancer = _constellation.cancer + 1;
-                _constellation.leo = _constellation.leo + 1;
-                _constellation.virgo = _constellation.virgo + 1;
-                _constellation.libra = _constellation.libra + 1;
-                _constellation.scorpio = _constellation.scorpio + 1;
-                _constellation.sagittarius = _constellation.sagittarius + 1;
-                _constellation.capricornus = _constellation.capricornus + 1;
-                _constellation.aquarius = _constellation.aquarius + 1;
-                _constellation.pisces = _constellation.pisces + 1;
-                _constellation.universal = _constellation.universal + 1;
-            //update
-            storage.myconstellation.insert((_identity, _epoch), _constellation);
-
-        }else{
-            let _constellation = Constellation{aries: 1, taurus: 1, gemini: 1, cancer: 1, leo: 1, virgo: 1, libra: 1, scorpio: 1, sagittarius: 1, capricornus: 1, aquarius: 1, pisces: 1, zodiac: 0, universal: 1};
-            storage.myconstellation.insert((_identity, _epoch), _constellation);
-        }
     }
 
 }
